@@ -234,7 +234,9 @@ function reveal(id, from) {
   }
   return true;
 }
-function pushData() { Graph.graphData({ nodes: shownNodes, links: shownLinks }); $('count-shown').textContent = visible.size; }
+// de graaf krijgt telkens een KOPIE van de lijsten: zo rekent de simulatie nooit
+// met een verbinding die nog niet aan zijn bolletjes gekoppeld is
+function pushData() { Graph.graphData({ nodes: shownNodes.slice(), links: shownLinks.slice() }); $('count-shown').textContent = visible.size; }
 // "verse" verbindingen terug normaal maken
 setInterval(() => {
   Graph.linkDirectionalParticles(Graph.linkDirectionalParticles())
