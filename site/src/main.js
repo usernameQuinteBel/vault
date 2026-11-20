@@ -103,11 +103,12 @@ function makeObject(n) {
   );
   g.add(mesh);
   const big = TYPE_RANK[n.type] <= 4;
-  const label = new SpriteText(n.name, big ? Math.max(3, r * 0.42) : 2.2, big ? T().label : T().labelSoft);
+  const labelSize = n.type === 'opleiding' ? 14 : n.type === 'jaar' ? 12 : big ? Math.max(3, r * 0.42) : 2.2;
+  const label = new SpriteText(n.type === 'jaar' ? n.name.toUpperCase() : n.name, labelSize, big ? T().label : T().labelSoft);
   label.fontFace = 'Inter, Helvetica Neue, Helvetica, Arial, sans-serif';
   label.fontWeight = big ? '800' : '500';
   label.backgroundColor = false;
-  label.position.y = -(r + (big ? 3.5 : 2.6));
+  label.position.y = (n.type === 'jaar' || n.type === 'opleiding') ? r + labelSize * 0.9 : -(r + (big ? 3.5 : 2.6));
   label.material.depthWrite = false;
   label.material.transparent = true;
   g.add(label);
@@ -167,9 +168,25 @@ Graph.d3Force('link').distance(l => {
 });
 // zachte zwaartekracht naar het midden: houdt alle vakken bij elkaar
 const GRAVITY = 0.04;
-Graph.d3Force('gx', forceX(0).strength(GRAVITY));
-Graph.d3Force('gy', forceY(0).strength(GRAVITY));
-Graph.d3Force('gz', forceZ(0).strength(GRAVITY));
+// Elk jaar krijgt een eigen ankerpunt op een cirkel rond het midden (IT Factory).
+// 1 jaar → alles in het midden; meerdere jaren → duidelijk uit elkaar.
+const YEAR_ANCHOR = (() => {
+  const jaren = [...new Set(data.nodes.map(n => n.jaar).filter(Boolean))].sort();
+  const anchors = new Map();
+  if (jaren.length <= 1) { for (const j of jaren) anchors.set(j, { x: 0, y: 0, z: 0 }); return anchors; }
+  const perJaar = jaren.map(j => data.nodes.filter(n => n.jaar === j).length);
+  const R = 340 + Math.sqrt(Math.max(...perJaar)) * 28;   // groter jaar = verder uit elkaar
+  jaren.forEach((j, i) => {
+    const a = (i / jaren.length) * Math.PI * 2 - Math.PI / 2;
+    anchors.set(j, { x: Math.cos(a) * R, y: 0, z: Math.sin(a) * R });
+  });
+  return anchors;
+})();
+const anchorOf = n => (n.jaar && YEAR_ANCHOR.get(n.jaar)) || { x: 0, y: 0, z: 0 };
+const pull = n => (n.jaar && YEAR_ANCHOR.size > 1) ? GRAVITY * 2.4 : GRAVITY; // jaren iets sterker naar hun plek
+Graph.d3Force('gx', forceX(n => anchorOf(n).x).strength(pull));
+Graph.d3Force('gy', forceY(n => anchorOf(n).y).strength(pull));
+Graph.d3Force('gz', forceZ(n => anchorOf(n).z).strength(pull));
 
 // belichting
 Graph.lights().forEach(l => Graph.scene().remove(l));
@@ -216,7 +233,7 @@ function reveal(id, from) {
   if (p && p.x !== undefined) {           // groeit uit zijn "ouder"
     const j = () => (Math.random() - 0.5) * 1.2;
     n.x = p.x + j(); n.y = p.y + j(); n.z = p.z + j();
-  } else if (n.x === undefined) { n.x = n.y = n.z = 0; }
+  } else if (n.x === undefined) { const a = anchorOf(n); n.x = a.x; n.y = a.y; n.z = a.z; }
   shownNodes.push(n);
   birth.set(id, performance.now());
   const freshUntil = performance.now() + Math.max(2500, speedMs() * 3);
