@@ -144,21 +144,21 @@ const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .linkDirectionalParticleWidth(l => isFresh(l) ? 1.5 : 0.9)
   .linkDirectionalParticleSpeed(l => isFresh(l) ? 0.009 : 0.0035)
   .linkDirectionalParticleColor(() => T().flow)
-  .d3AlphaDecay(0.018)        // trager afkoelen = vloeiender bewegen
-  .d3VelocityDecay(0.68)      // meer "wrijving" = geen schokken bij nieuwe bolletjes
+  .d3AlphaDecay(0.011)        // trager afkoelen = vloeiender bewegen
+  .d3VelocityDecay(0.6)      // meer "wrijving" = geen schokken bij nieuwe bolletjes
   .warmupTicks(0)
   .onNodeClick(n => openNode(n.id, true))
   .onNodeHover(n => { $('graph').style.cursor = n ? 'pointer' : ''; })
   .onBackgroundClick(() => closePanel());
 
 // afstoting enkel op korte afstand, zodat losse vakken niet wegdrijven
-Graph.d3Force('charge').strength(n => -30 - sizeOf(n) * 5).distanceMax(180);
+Graph.d3Force('charge').strength(n => -38 - sizeOf(n) * 6).distanceMax(230);
 Graph.d3Force('link').distance(l => {
   const a = byId.get(idOf(l.source)), b = byId.get(idOf(l.target));
-  return 16 + (sizeOf(a) + sizeOf(b)) * 1.8;
+  return 18 + (sizeOf(a) + sizeOf(b)) * 2.0;
 });
 // zachte zwaartekracht naar het midden: houdt alle vakken bij elkaar
-const GRAVITY = 0.045;
+const GRAVITY = 0.04;
 Graph.d3Force('gx', forceX(0).strength(GRAVITY));
 Graph.d3Force('gy', forceY(0).strength(GRAVITY));
 Graph.d3Force('gz', forceZ(0).strength(GRAVITY));
@@ -178,12 +178,17 @@ function setLights() {
 }
 setLights();
 
+const canvas = Graph.renderer().domElement;
+canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); $('now').innerHTML = '<b>Grafische kaart herstarten…</b>'; });
+canvas.addEventListener('webglcontextrestored', () => location.reload());
 const controls = Graph.controls();
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 const camera = Graph.camera();
-camera.near = 2;
+camera.near = 4;
 camera.updateProjectionMatrix();
+controls.minDistance = 60;     // niet tot in de bollen inzoomen
+controls.maxDistance = 6000;
 // zodra jij de camera vastpakt, stopt het automatisch draaien even
 controls.addEventListener('start', () => { manualUntil = performance.now() + 9000; });
 $('graph').addEventListener('wheel', () => { manualUntil = performance.now() + 9000; }, { passive: true });
@@ -283,9 +288,9 @@ function restart() {
 const cam = { target: new THREE.Vector3(), radius: 420, angle: 0, elev: 0.28, flyFrom: null, flyTo: null, flyStart: 0, flyMs: 0 };
 function graphBounds() {
   const c = new THREE.Vector3(); let k = 0;
-  for (const n of shownNodes) if (n.x !== undefined) { c.x += n.x; c.y += n.y; c.z += n.z; k++; }
+  for (const n of shownNodes) if (Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z)) { c.x += n.x; c.y += n.y; c.z += n.z; k++; }
   if (k) c.divideScalar(k);
-  const d = shownNodes.filter(n => n.x !== undefined).map(n => Math.hypot(n.x - c.x, n.y - c.y, n.z - c.z)).sort((a, b) => a - b);
+  const d = shownNodes.filter(n => Number.isFinite(n.x)).map(n => Math.hypot(n.x - c.x, n.y - c.y, n.z - c.z)).sort((a, b) => a - b);
   const r = d.length ? d[Math.floor(d.length * 0.92)] || d[d.length - 1] : 0;
   return { c, r };
 }
@@ -295,7 +300,7 @@ function autoCamera(dt, now) {
   if (now - boundsAt > 250) { bounds = graphBounds(); boundsAt = now; }
   const focus = (selected && byId.get(selected)) || newest;
   const want = bounds.c.clone();
-  if (focus && focus.x !== undefined) want.lerp(new THREE.Vector3(focus.x, focus.y, focus.z), selected ? 0.85 : 0.55);
+  if (focus && Number.isFinite(focus.x)) want.lerp(new THREE.Vector3(focus.x, focus.y, focus.z), selected ? 0.85 : 0.55);
   const wantRadius = Math.max(260, bounds.r * 1.35 + 160) * (selected ? 0.8 : 1);
   const k = 1 - Math.exp(-dt * 1.2);          // zachte, framerate-onafhankelijke demping
   cam.target.lerp(want, k);
@@ -318,6 +323,32 @@ function syncAngleFromCamera() {
   cam.elev = Math.max(-0.6, Math.min(0.9, Math.asin(v.y / (v.length() || 1))));
   cam.radius = v.length();
   cam.target.copy(controls.target);
+}
+
+/* ================= veiligheidsnet camera =================
+   1) ongeldige positie (NaN) → camera terugzetten
+   2) camera te dicht bij een bol → zachtjes wegduwen, zodat er nooit een bol je scherm vult */
+const tmpV = new THREE.Vector3();
+let safeCheckAt = 0;
+function keepCameraSafe(now) {
+  const p = camera.position;
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z) ||
+      !Number.isFinite(controls.target.x)) {
+    p.set(0, 120, 420); controls.target.set(0, 0, 0); cam.target.set(0, 0, 0); cam.radius = 420;
+    camera.lookAt(0, 0, 0);
+    return;
+  }
+  if (now - safeCheckAt < 50) return; safeCheckAt = now;
+  for (const n of shownNodes) {
+    if (n.x === undefined || !Number.isFinite(n.x)) continue;
+    const minD = sizeOf(n) * 4 + 18;
+    tmpV.set(p.x - n.x, p.y - n.y, p.z - n.z);
+    const d = tmpV.length();
+    if (d < minD) {
+      if (d < 0.001) tmpV.set(0, 0, 1); else tmpV.divideScalar(d);
+      p.set(n.x + tmpV.x * minD, n.y + tmpV.y * minD, n.z + tmpV.z * minD);
+    }
+  }
 }
 
 /* ================= animatielus ================= */
@@ -365,6 +396,7 @@ let last = performance.now(), wasManual = false;
     if (wasManual) { syncAngleFromCamera(); wasManual = false; }
     autoCamera(dt, now);
   }
+  keepCameraSafe(now);
   requestAnimationFrame(animate);
 })();
 
