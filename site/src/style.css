@@ -87,10 +87,30 @@ button,input{font:inherit;color:inherit}
 .tooltip{font-family:var(--mono);font-size:12px;background:var(--ink);color:var(--bg);padding:6px 8px;max-width:280px;white-space:normal}
 
 @media (max-width:720px){
+  html,body{overscroll-behavior:none}
+  #graph{touch-action:none}
   #legend{display:none}
-  #brand{max-width:60vw}
-  #counter{font-size:22px}
-  #top-right{top:auto;bottom:70px;left:24px;right:24px}
+  #brand{top:14px;left:16px;max-width:calc(100vw - 80px)}
+  #brand .eyebrow{font-size:9.5px;letter-spacing:.18em}
+  #counter{font-size:22px;margin-top:4px}
+  #now{font-size:11px}
+  #top-right{top:auto;bottom:calc(64px + env(safe-area-inset-bottom));left:16px;right:16px}
   #search-wrap{flex:1;width:auto}
+  #search{font-size:16px;padding:11px 12px}            /* 16px: iOS zoomt dan niet in */
+  #results{position:absolute;bottom:100%;left:0;right:0;max-height:45vh;border-top:1px solid var(--line);border-bottom:0}
+  #btn-theme{height:44px;width:44px}
+  #controls{left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom));gap:6px;flex-wrap:nowrap}
+  #controls button{padding:10px 9px;font-size:10px;letter-spacing:.08em;flex:1;min-height:40px}
+  #btn-play{flex:0 0 44px}
+  .speed{display:none}
+  /* paneel als onderblad */
+  #panel{top:auto;left:0;right:0;width:100vw;height:78vh;border-left:0;border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0;padding:22px 18px calc(30px + env(safe-area-inset-bottom));transform:translateY(100%)}
+  #panel.open{transform:none}
+  #panel::before{content:"";position:absolute;top:8px;left:50%;width:40px;height:4px;margin-left:-20px;border-radius:2px;background:var(--line)}
+  #panel-close{top:10px;right:10px;font-size:30px;padding:6px 10px}
+  #panel-body{font-size:15px}
+  #panel-body h1{font-size:25px}
+  #intro h1{font-size:52px}
 }
 @media (prefers-reduced-motion:reduce){ #panel,#intro,html,body{transition:none} }

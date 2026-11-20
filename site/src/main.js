@@ -27,6 +27,8 @@ const ORBIT_SPEED = 0.06;     // radialen per seconde dat de camera rond draait
 const $ = id => document.getElementById(id);
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// gsm/tablet: lichtere 3D (minder polygonen, minder stromende bolletjes, lagere resolutie)
+const isMobile = matchMedia('(max-width: 720px), (pointer: coarse)').matches;
 const lerp = (a, b, t) => a + (b - a) * t;
 const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const easeOutBack = t => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
@@ -98,7 +100,7 @@ function makeObject(n) {
   const g = new THREE.Group();
   const r = sizeOf(n);
   const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(r, 24, 16),
+    new THREE.SphereGeometry(r, isMobile ? 14 : 24, isMobile ? 10 : 16),
     new THREE.MeshStandardMaterial({ color: colorOf(n), roughness: 0.55, metalness: 0.08, transparent: true, opacity: 0.96 })
   );
   g.add(mesh);
@@ -142,7 +144,7 @@ const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .linkWidth(0.35)
   .linkMaterial(linkMat)
   // over elke verbinding stromen bolletjes; over nieuwe verbindingen meer
-  .linkDirectionalParticles(l => isFresh(l) ? 4 : 1)
+  .linkDirectionalParticles(l => isFresh(l) ? (isMobile ? 2 : 4) : (isMobile ? 0 : 1))
   .linkDirectionalParticleWidth(l => isFresh(l) ? 1.5 : 0.9)
   .linkDirectionalParticleSpeed(l => isFresh(l) ? 0.009 : 0.0035)
   .linkDirectionalParticleColor(() => T().flow)
@@ -203,6 +205,7 @@ function setLights() {
 }
 setLights();
 
+Graph.renderer().setPixelRatio(Math.min(devicePixelRatio || 1, isMobile ? 1.5 : 2));
 const canvas = Graph.renderer().domElement;
 canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); $('now').innerHTML = '<b>Grafische kaart herstarten…</b>'; });
 canvas.addEventListener('webglcontextrestored', () => location.reload());
@@ -219,7 +222,7 @@ controls.addEventListener('start', () => { manualUntil = performance.now() + 900
 $('graph').addEventListener('wheel', () => { manualUntil = performance.now() + 9000; }, { passive: true });
 
 function fitToPanel(open) {
-  const w = open && innerWidth > 900 ? innerWidth - $('panel').offsetWidth : innerWidth;
+  const w = open && innerWidth > 900 ? innerWidth - $('panel').offsetWidth : innerWidth;  // op gsm schuift het paneel over de graaf
   Graph.width(w).height(innerHeight);
 }
 addEventListener('resize', () => fitToPanel($('panel').classList.contains('open')));
@@ -331,7 +334,7 @@ function autoCamera(dt, now) {
   const focus = (selected && byId.get(selected)) || newest;
   const want = bounds.c.clone();
   if (focus && Number.isFinite(focus.x)) want.lerp(new THREE.Vector3(focus.x, focus.y, focus.z), selected ? 0.85 : 0.55);
-  const wantRadius = Math.max(260, bounds.r * 1.35 + 160) * (selected ? 0.8 : 1);
+  const wantRadius = Math.max(260, bounds.r * 1.35 + 160) * (selected ? 0.8 : 1) * (innerWidth < innerHeight ? 1.45 : 1);
   const k = 1 - Math.exp(-dt * 1.2);          // zachte, framerate-onafhankelijke demping
   cam.target.lerp(want, k);
   cam.radius = lerp(cam.radius, wantRadius, 1 - Math.exp(-dt * 0.8));
