@@ -129,3 +129,6 @@ button,input{font:inherit;color:inherit}
   #panel-body h1{font-size:22px}
 }
 @media (prefers-reduced-motion:reduce){ #panel,#intro,html,body{transition:none} }
+
+/* verborgen op vraag: teller, "nu"-regel en legende */
+#counter,#now,#legend{display:none!important}
