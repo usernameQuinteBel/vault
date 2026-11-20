@@ -9,5 +9,5 @@ Kennisbank van mijn opleiding IT Factory aan Thomas More (campus Geel). Per jaar
 
 ## Jaren
 - 1ste jaar – _nog aan te vullen_
-- 2de jaar – _nog aan te vullen_
+- [[2de jaar]]
 - [[3de jaar]]
