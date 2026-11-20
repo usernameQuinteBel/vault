@@ -1,0 +1,18 @@
+{
+  "name": "it-factory-kennisgraaf",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs && esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=dist/app.js",
+    "dev": "node build.mjs && esbuild src/main.js --bundle --format=esm --target=es2022 --outfile=dist/app.js --servedir=dist --serve=8000"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.80.2",
+    "marked": "^18.2.1",
+    "three": "^0.187.0",
+    "three-spritetext": "^1.10.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

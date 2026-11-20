@@ -1,0 +1,12 @@
+# Originele cursusbestanden blijven lokaal (auteursrecht)
+bronnen/
+
+# Persoonlijke Obsidian-instellingen
+vault/.obsidian/workspace*.json
+vault/.obsidian/cache
+.DS_Store
+node_modules/
+
+# Website (wordt gebouwd door GitHub Actions)
+site/node_modules/
+site/dist/

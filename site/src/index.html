@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obsidian Vault — Quinte Belmans</title>
+<meta name="description" content="Obsidian Vault van Quinte Belmans: alle cursusnotities van IT Factory als groeiende 3D-kennisgraaf.">
+<meta name="theme-color" content="#eaeae8">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2710%27 fill=%27%23141414%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script>
+  // thema meteen zetten (voorkomt een witte flits in donkere modus)
+  try {
+    const t = localStorage.getItem('vault-theme');
+    if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark');
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div id="intro" aria-hidden="true">
+  <div class="intro-inner">
+    <div class="eyebrow">Quinte Belmans</div>
+    <h1>Obsidian<br>Vault</h1>
+    <div class="bar"><span id="intro-bar"></span></div>
+  </div>
+</div>
+
+<div id="graph" aria-label="3D-kennisgraaf"></div>
+
+<header id="brand">
+  <div class="eyebrow">Obsidian Vault · Quinte Belmans</div>
+  <div id="counter"><b id="count-shown">0</b> / <span id="count-total">0</span> notities</div>
+  <div id="now" aria-live="polite"></div>
+</header>
+
+<div id="top-right">
+  <div id="search-wrap">
+    <input id="search" type="search" placeholder="Zoek een begrip…" autocomplete="off" aria-label="Zoek een begrip">
+    <ul id="results" role="listbox"></ul>
+  </div>
+  <button id="btn-theme" title="Licht / donker (D)" aria-label="Wissel licht en donker">☾</button>
+</div>
+
+<nav id="legend" aria-label="Vakken"></nav>
+
+<div id="controls">
+  <button id="btn-play" title="Pauze / verder (spatie)" aria-label="Pauze">❚❚</button>
+  <label class="speed">traag<input id="speed" type="range" min="0" max="100" value="30" aria-label="Snelheid">snel</label>
+  <button id="btn-orbit" class="on" title="Camera draait automatisch rond (R)">draaien</button>
+  <button id="btn-all" title="Alles meteen tonen">alles</button>
+  <button id="btn-restart" title="Opnieuw laten groeien">opnieuw</button>
+</div>
+
+<aside id="panel" aria-hidden="true">
+  <button id="panel-close" aria-label="Sluiten">×</button>
+  <div id="panel-meta" class="eyebrow"></div>
+  <article id="panel-body"></article>
+  <div id="panel-links"></div>
+</aside>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
