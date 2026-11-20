@@ -54,18 +54,34 @@ const adj = new Map(data.nodes.map(n => [n.id, new Set()]));
 for (const l of data.links) { adj.get(l.source).add(l.target); adj.get(l.target).add(l.source); }
 
 // Groeivolgorde: breadth-first vanaf de root, overzichten eerst, dan begrippen.
+// jaarnummer uit "1ste jaar", "2de jaar", "3de jaar" …
+const jaarNum = j => parseInt(j, 10) || 99;
+const JAREN = [...new Set(data.nodes.map(n => n.jaar).filter(Boolean))].sort((a, b) => jaarNum(a) - jaarNum(b) || a.localeCompare(b));
+// groeivolgorde: IT Factory → volledig 1ste jaar → volledig 2de jaar → volledig 3de jaar → rest
 function growthOrder() {
   const order = [], parent = new Map(), seen = new Set();
   const rank = id => TYPE_RANK[byId.get(id).type] ?? 9;
   const rankSort = (a, b) => rank(a) - rank(b) || byId.get(a).name.localeCompare(byId.get(b).name);
-  const starts = [data.root, ...data.nodes.map(n => n.id).sort(rankSort)];
-  for (const s of starts) {
-    if (!s || seen.has(s)) continue;
-    const q = [s]; seen.add(s);
+  const bfs = (s, allow, from) => {
+    if (!s || seen.has(s) || !allow(s)) return;
+    const q = [s]; seen.add(s); if (from) parent.set(s, from);
     while (q.length) {
       const id = q.shift(); order.push(id);
-      for (const nb of [...adj.get(id)].sort(rankSort)) if (!seen.has(nb)) { seen.add(nb); parent.set(nb, id); q.push(nb); }
+      for (const nb of [...adj.get(id)].sort(rankSort)) if (!seen.has(nb) && allow(nb)) { seen.add(nb); parent.set(nb, id); q.push(nb); }
     }
+  };
+  if (data.root) { seen.add(data.root); order.push(data.root); }
+  for (const j of JAREN) {
+    const inJaar = id => byId.get(id).jaar === j;
+    const ids = data.nodes.filter(n => n.jaar === j).map(n => n.id).sort(rankSort);  // jaar-bolletje eerst
+    for (const s of ids) {
+      const from = [...adj.get(s)].find(nb => seen.has(nb)) || data.root;
+      bfs(s, inJaar, from);
+    }
+  }
+  for (const s of data.nodes.map(n => n.id).sort(rankSort)) {
+    const from = [...adj.get(s)].find(nb => seen.has(nb));
+    bfs(s, () => true, from);
   }
   return { order, parent };
 }
@@ -105,7 +121,8 @@ function makeObject(n) {
   );
   g.add(mesh);
   const big = TYPE_RANK[n.type] <= 4;
-  const labelSize = n.type === 'opleiding' ? 14 : n.type === 'jaar' ? 12 : big ? Math.max(3, r * 0.42) : 2.2;
+  const LS = isMobile ? 0.62 : 1;   // op gsm kleinere titels, anders schuiven ze over elkaar
+  const labelSize = n.type === 'opleiding' ? 14 * LS : n.type === 'jaar' ? 12 * LS : big ? Math.max(3, r * 0.42) * (isMobile ? 0.85 : 1) : 2.2;
   const label = new SpriteText(n.type === 'jaar' ? n.name.toUpperCase() : n.name, labelSize, big ? T().label : T().labelSoft);
   label.fontFace = 'Inter, Helvetica Neue, Helvetica, Arial, sans-serif';
   label.fontWeight = big ? '800' : '500';
@@ -151,6 +168,7 @@ const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .d3AlphaDecay(0.011)        // trager afkoelen = vloeiender bewegen
   .d3VelocityDecay(0.6)      // meer "wrijving" = geen schokken bij nieuwe bolletjes
   .warmupTicks(0)
+  .cooldownTime(40000)       // lang genoeg uitbollen tot alles op zijn plek ligt
   .onNodeClick(n => { if (!justDragged) openNode(n.id, true); })
   // slepen: camera staat stil zolang je sleept, daarna zweeft het bolletje terug
   .onNodeDrag(n => { dragging = true; manualUntil = performance.now() + 6000; })
@@ -170,22 +188,40 @@ Graph.d3Force('link').distance(l => {
 });
 // zachte zwaartekracht naar het midden: houdt alle vakken bij elkaar
 const GRAVITY = 0.04;
-// Elk jaar krijgt een eigen ankerpunt op een cirkel rond het midden (IT Factory).
-// 1 jaar → alles in het midden; meerdere jaren → duidelijk uit elkaar.
-const YEAR_ANCHOR = (() => {
-  const jaren = [...new Set(data.nodes.map(n => n.jaar).filter(Boolean))].sort();
-  const anchors = new Map();
-  if (jaren.length <= 1) { for (const j of jaren) anchors.set(j, { x: 0, y: 0, z: 0 }); return anchors; }
-  const perJaar = jaren.map(j => data.nodes.filter(n => n.jaar === j).length);
-  const R = 340 + Math.sqrt(Math.max(...perJaar)) * 28;   // groter jaar = verder uit elkaar
-  jaren.forEach((j, i) => {
-    const a = (i / jaren.length) * Math.PI * 2 - Math.PI / 2;
-    anchors.set(j, { x: Math.cos(a) * R, y: 0, z: Math.sin(a) * R });
-  });
-  return anchors;
+// Elk jaar krijgt een vaste kolom op een rij: 1ste links, 2de midden, 3de rechts
+// (ook als een jaar nog leeg is, blijft zijn plek vrij). 1 jaar → alles in het midden.
+// Binnen een jaar krijgt elk vak een eigen plekje op een cirkel rond die kolom.
+const MULTI = JAREN.length > 1;
+const ANCHOR = (() => {
+  const m = new Map();                       // 'jaar' of 'jaar|vak' → {x,y,z}
+  if (!MULTI) return m;
+  const yearR = new Map();
+  for (const j of JAREN) {
+    const vakken = [...new Set(data.nodes.filter(n => n.jaar === j && n.vak).map(n => n.vak))].sort();
+    const per = Math.max(1, ...vakken.map(v => data.nodes.filter(n => n.jaar === j && n.vak === v).length));
+    const ring = vakken.length > 1 ? 40 + Math.sqrt(per) * 9 : 0;   // straal van de vakken-cirkel
+    yearR.set(j, { vakken, ring, clusterR: ring + Math.sqrt(per) * 7 });
+  }
+  const maxR = Math.max(...[...yearR.values()].map(y => y.clusterR));
+  const D = maxR * 2 + 90;                   // afstand tussen twee jaren: net genoeg ruimte ertussen
+  for (const j of JAREN) {
+    const x = (Math.min(jaarNum(j), 9) - 2) * D;
+    const { vakken, ring } = yearR.get(j);
+    m.set(j, { x, y: 0, z: 0 });
+    vakken.forEach((v, i) => {
+      const t = (i / vakken.length) * Math.PI * 2 + Math.PI / 2;
+      m.set(j + '|' + v, { x, y: Math.sin(t) * ring, z: Math.cos(t) * ring * 0.6 });
+    });
+  }
+  const xs = JAREN.map(j => m.get(j).x);
+  m.set('__root', { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: maxR + 60, z: 0 });   // IT Factory erboven
+  return m;
 })();
-const anchorOf = n => (n.jaar && YEAR_ANCHOR.get(n.jaar)) || { x: 0, y: 0, z: 0 };
-const pull = n => (n.jaar && YEAR_ANCHOR.size > 1) ? GRAVITY * 2.4 : GRAVITY; // jaren iets sterker naar hun plek
+const ZERO = { x: 0, y: 0, z: 0 };
+const anchorOf = n => !MULTI ? ZERO
+  : n.id === data.root ? ANCHOR.get('__root')
+  : (n.jaar && (ANCHOR.get(n.jaar + '|' + n.vak) || ANCHOR.get(n.jaar))) || ZERO;
+const pull = n => MULTI ? (n.jaar ? 0.09 : 0.05) : GRAVITY;
 Graph.d3Force('gx', forceX(n => anchorOf(n).x).strength(pull));
 Graph.d3Force('gy', forceY(n => anchorOf(n).y).strength(pull));
 Graph.d3Force('gz', forceZ(n => anchorOf(n).z).strength(pull));
@@ -222,10 +258,41 @@ controls.addEventListener('start', () => { manualUntil = performance.now() + 900
 $('graph').addEventListener('wheel', () => { manualUntil = performance.now() + 9000; }, { passive: true });
 
 function fitToPanel(open) {
-  const w = open && innerWidth > 900 ? innerWidth - $('panel').offsetWidth : innerWidth;  // op gsm schuift het paneel over de graaf
+  const w = open && innerWidth > 720 ? innerWidth - $('panel').offsetWidth : innerWidth;  // op gsm (staand) schuift het paneel over de graaf
   Graph.width(w).height(innerHeight);
+  freeAt = 0;
 }
-addEventListener('resize', () => fitToPanel($('panel').classList.contains('open')));
+addEventListener('resize', () => { fitToPanel($('panel').classList.contains('open')); freeAt = 0; });
+
+/* ================= vrije schermruimte =================
+   Op gsm liggen titel (boven) en zoekbalk/knoppen/paneel (onder) over de graaf.
+   We verschuiven het beeld (view offset) zodat de graaf in het midden van de VRIJE ruimte staat,
+   en zoomen verder uit naarmate die ruimte kleiner is. */
+let freeAt = 0, free = { top: 0, bottom: 0 }, viewY = 0;
+function measureFree() {
+  const H = innerHeight;
+  let top = 0, bottom = H;
+  const els = ['brand', 'top-right', 'controls', 'legend'].map($).filter(Boolean);
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (!r.height || getComputedStyle(el).display === 'none') continue;
+    if (r.left > innerWidth * 0.45 && r.top < H / 2 && innerWidth > 720) continue; // rechtsboven op desktop: naast de graaf
+    if ((r.top + r.bottom) / 2 < H / 2) top = Math.max(top, r.bottom);
+    else bottom = Math.min(bottom, r.top);
+  }
+  const panel = $('panel');
+  if (panel.classList.contains('open') && innerWidth <= 720) bottom = Math.min(bottom, H - panel.offsetHeight);
+  free = { top: top + 8, bottom: Math.max(top + 80, bottom - 8) };
+}
+function updateView(dt, now) {
+  if (now - freeAt > 300) { measureFree(); freeAt = now; }
+  const W = Graph.width(), H = Graph.height();
+  const want = H / 2 - (free.top + free.bottom) / 2;          // hoeveel het midden omhoog moet
+  viewY += (want - viewY) * (1 - Math.exp(-dt * 4));
+  if (Math.abs(viewY) < 0.5 && Math.abs(want) < 0.5) { if (camera.view) camera.clearViewOffset(); return; }
+  camera.setViewOffset(W, H, 0, viewY, W, H);
+}
+const freeFraction = () => Math.max(0.25, (free.bottom - free.top) / innerHeight);
 
 /* ================= groeien ================= */
 function reveal(id, from) {
@@ -329,21 +396,24 @@ function graphBounds() {
 }
 let bounds = { c: new THREE.Vector3(), r: 0 }, boundsAt = 0;
 
+const SWING = 0.75;   // max. zwaai (rad) bij meerdere jaren
 function autoCamera(dt, now) {
   if (now - boundsAt > 250) { bounds = graphBounds(); boundsAt = now; }
   const focus = (selected && byId.get(selected)) || newest;
   const want = bounds.c.clone();
   if (focus && Number.isFinite(focus.x)) want.lerp(new THREE.Vector3(focus.x, focus.y, focus.z), selected ? 0.85 : 0.55);
-  const wantRadius = Math.max(260, bounds.r * 1.35 + 160) * (selected ? 0.8 : 1) * (innerWidth < innerHeight ? 1.45 : 1);
+  const wantRadius = Math.max(260, bounds.r * 1.35 + 160) * (selected ? 0.8 : 1) * (innerWidth < innerHeight ? 1.45 : 1) / Math.sqrt(freeFraction());
   const k = 1 - Math.exp(-dt * 1.2);          // zachte, framerate-onafhankelijke demping
   cam.target.lerp(want, k);
   cam.radius = lerp(cam.radius, wantRadius, 1 - Math.exp(-dt * 0.8));
   if (orbit && !reduceMotion) cam.angle += dt * ORBIT_SPEED;
   const elev = cam.elev + Math.sin(now / 9000) * 0.12;   // licht op en neer golven
+  // meerdere jaren: zachtjes heen en weer zwaaien vóór de rij, zodat 1ste → 2de → 3de van links naar rechts blijft
+  const ang = MULTI ? Math.PI / 2 + SWING * Math.sin(cam.angle) : cam.angle;
   const pos = new THREE.Vector3(
-    bounds.c.x + Math.cos(cam.angle) * Math.cos(elev) * cam.radius,
+    bounds.c.x + Math.cos(ang) * Math.cos(elev) * cam.radius,
     bounds.c.y + Math.sin(elev) * cam.radius,
-    bounds.c.z + Math.sin(cam.angle) * Math.cos(elev) * cam.radius,
+    bounds.c.z + Math.sin(ang) * Math.cos(elev) * cam.radius,
   );
   camera.position.lerp(pos, 1 - Math.exp(-dt * 2));
   controls.target.copy(cam.target);
@@ -352,7 +422,8 @@ function autoCamera(dt, now) {
 // wanneer je de camera zelf beweegt: hoek overnemen zodat het automatisch draaien er vloeiend op aansluit
 function syncAngleFromCamera() {
   const v = camera.position.clone().sub(bounds.c);
-  cam.angle = Math.atan2(v.z, v.x);
+  const a = Math.atan2(v.z, v.x);
+  cam.angle = MULTI ? Math.asin(Math.max(-1, Math.min(1, (a - Math.PI / 2) / SWING))) : a;
   cam.elev = Math.max(-0.6, Math.min(0.9, Math.asin(v.y / (v.length() || 1))));
   cam.radius = v.length();
   cam.target.copy(controls.target);
@@ -435,6 +506,7 @@ let last = performance.now(), wasManual = false;
     autoCamera(dt, now);
   }
   if (!dragging) keepCameraSafe(now);
+  updateView(dt, now);
   requestAnimationFrame(animate);
 })();
 
