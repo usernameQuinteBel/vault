@@ -1,0 +1,8 @@
+# Netlify bouwt de 3D-kennisgraaf uit vault/ bij elke push naar main.
+[build]
+  base    = "site"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
