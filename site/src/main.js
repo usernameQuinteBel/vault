@@ -21,7 +21,7 @@ const THEMES = {
 };
 const TYPE_RANK = { opleiding: 0, jaar: 1, vak: 2, onderdeel: 3, chapter: 4, begrip: 5, demo: 6, oefening: 6, notitie: 7 };
 const TYPE_SIZE = { opleiding: 16, jaar: 11, vak: 8, onderdeel: 5.5, chapter: 4.2, begrip: 2.6, demo: 2.4, oefening: 2.6, notitie: 2.4 };
-const POP_MS = 1600;          // duur van het "opblazen" van een nieuw bolletje
+const POP_MS = 1400;          // duur van het "opblazen" van een nieuw bolletje
 const ORBIT_SPEED = 0.06;     // radialen per seconde dat de camera rond draait
 
 const $ = id => document.getElementById(id);
@@ -29,6 +29,7 @@ const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const lerp = (a, b, t) => a + (b - a) * t;
 const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOutBack = t => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 
 let theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 const T = () => THEMES[theme];
@@ -84,6 +85,14 @@ $('count-total').textContent = data.nodes.length;
 
 /* ================= graaf ================= */
 const objects = new Map();
+// cirkeltextuur voor de rimpel rond een nieuw bolletje
+const RING_TEX = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  x.strokeStyle = '#fff'; x.lineWidth = 5;
+  x.beginPath(); x.arc(64, 64, 58, 0, Math.PI * 2); x.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+})();
 function makeObject(n) {
   const g = new THREE.Group();
   const r = sizeOf(n);
@@ -101,29 +110,42 @@ function makeObject(n) {
   label.material.depthWrite = false;
   label.material.transparent = true;
   g.add(label);
-  g.userData = { mesh, label, big };
-  g.scale.setScalar(0.001); // groeit vanuit niets (zie animate)
+  // rimpel die bij het verschijnen naar buiten uitdeint
+  const ripple = new THREE.Sprite(new THREE.SpriteMaterial({ map: RING_TEX, color: colorOf(n), transparent: true, opacity: 0, depthWrite: false }));
+  ripple.scale.setScalar(r * 2);
+  g.add(ripple);
+  mesh.material.opacity = 0;
+  label.material.opacity = 0;
+  g.userData = { mesh, label, ripple, big, r, base: 0.96, labelBase: 1 };
+  mesh.scale.setScalar(0.001); // groeit vanuit niets (zie animate)
   objects.set(n.id, g);
   return g;
 }
 
 const isFresh = l => l.__fresh > performance.now();
+// elke verbinding krijgt een eigen materiaal, zodat ze apart kan infaden en verkleuren
+const LINK_BASE = () => theme === 'dark' ? 0.16 : 0.18;
+const LINK_FRESH = 0.85;
+function linkMat(l) {
+  if (!l.__mat) l.__mat = new THREE.MeshBasicMaterial({ color: T().ink, transparent: true, opacity: 0, depthWrite: false });
+  return l.__mat;
+}
+const youngLinks = new Set();
 const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .backgroundColor(T().bg)
   .showNavInfo(false)
   .nodeId('id')
   .nodeThreeObject(makeObject)
   .nodeLabel(n => `<div class="tooltip"><b>${esc(n.name)}</b>${n.summary ? '<br>' + esc(n.summary) : ''}</div>`)
-  .linkColor(l => isFresh(l) ? T().fresh : T().link)
-  .linkOpacity(0.6)
-  .linkWidth(l => isFresh(l) ? 0.7 : 0.22)
+  .linkWidth(0.35)
+  .linkMaterial(linkMat)
   // over elke verbinding stromen bolletjes; over nieuwe verbindingen meer
   .linkDirectionalParticles(l => isFresh(l) ? 4 : 1)
   .linkDirectionalParticleWidth(l => isFresh(l) ? 1.5 : 0.9)
   .linkDirectionalParticleSpeed(l => isFresh(l) ? 0.009 : 0.0035)
   .linkDirectionalParticleColor(() => T().flow)
-  .d3AlphaDecay(0.012)        // trager afkoelen = vloeiender bewegen
-  .d3VelocityDecay(0.55)      // meer "wrijving" = geen schokken
+  .d3AlphaDecay(0.018)        // trager afkoelen = vloeiender bewegen
+  .d3VelocityDecay(0.68)      // meer "wrijving" = geen schokken bij nieuwe bolletjes
   .warmupTicks(0)
   .onNodeClick(n => openNode(n.id, true))
   .onNodeHover(n => { $('graph').style.cursor = n ? 'pointer' : ''; })
@@ -179,7 +201,7 @@ function reveal(id, from) {
   visible.add(id);
   const p = from && byId.get(from);
   if (p && p.x !== undefined) {           // groeit uit zijn "ouder"
-    const j = () => (Math.random() - 0.5) * 4;
+    const j = () => (Math.random() - 0.5) * 1.2;
     n.x = p.x + j(); n.y = p.y + j(); n.z = p.z + j();
   } else if (n.x === undefined) { n.x = n.y = n.z = 0; }
   shownNodes.push(n);
@@ -191,6 +213,9 @@ function reveal(id, from) {
     if (visible.has(other) && !shownLinkKeys.has(k)) {
       shownLinkKeys.add(k);
       l.__fresh = freshUntil;
+      l.__born = performance.now();
+      if (l.__mat) l.__mat.opacity = 0;
+      youngLinks.add(l);
       shownLinks.push(l);
     }
   }
@@ -199,8 +224,7 @@ function reveal(id, from) {
 function pushData() { Graph.graphData({ nodes: shownNodes, links: shownLinks }); $('count-shown').textContent = visible.size; }
 // "verse" verbindingen terug normaal maken
 setInterval(() => {
-  Graph.linkColor(Graph.linkColor()).linkWidth(Graph.linkWidth())
-    .linkDirectionalParticles(Graph.linkDirectionalParticles())
+  Graph.linkDirectionalParticles(Graph.linkDirectionalParticles())
     .linkDirectionalParticleWidth(Graph.linkDirectionalParticleWidth())
     .linkDirectionalParticleSpeed(Graph.linkDirectionalParticleSpeed());
 }, 1200);
@@ -301,13 +325,39 @@ let last = performance.now(), wasManual = false;
 (function animate(now) {
   now = now || performance.now();
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  // bolletjes vloeiend laten opblazen
-  for (const [id, t] of birth) {
-    const o = objects.get(id); if (!o) continue;
-    const a = Math.min(1, (now - t) / POP_MS);
-    const s = reduceMotion ? 1 : (a < 1 ? ease(a) * (1 + 0.25 * Math.sin(a * Math.PI)) : 1);
-    o.scale.setScalar(Math.max(0.001, s));
-    if (a >= 1) birth.delete(id);
+  const k = 1 - Math.exp(-dt * 6); // zachte overgang voor dimmen/oplichten
+  for (const n of shownNodes) {
+    const o = objects.get(n.id); if (!o) continue;
+    const u = o.userData;
+    const t0 = birth.get(n.id);
+    let grow = 1;
+    if (t0 !== undefined) {
+      const a = Math.min(1, (now - t0) / POP_MS);
+      grow = reduceMotion ? 1 : easeOutBack(a);
+      // rimpel: deint uit en vervaagt
+      u.ripple.scale.setScalar(u.r * (2 + a * 7));
+      u.ripple.material.opacity = reduceMotion ? 0 : 0.55 * (1 - a) * (1 - a);
+      u.mesh.material.opacity = u.base * Math.min(1, a * 2.2);
+      u.label.material.opacity = u.labelBase * Math.max(0, Math.min(1, (a - 0.35) / 0.5));
+      if (a >= 1) { birth.delete(n.id); u.ripple.visible = false; }
+    } else {
+      u.mesh.material.opacity += (u.base - u.mesh.material.opacity) * k;
+      u.label.material.opacity += (u.labelBase - u.label.material.opacity) * k;
+    }
+    u.mesh.scale.setScalar(Math.max(0.001, grow));
+  }
+  // verbindingen: infaden, fel beginnen en langzaam naar de normale kleur
+  const inkC = new THREE.Color(T().ink), baseO = LINK_BASE();
+  for (const l of youngLinks) {
+    if (!l.__mat) continue;
+    const age = now - l.__born;
+    const fadeIn = Math.min(1, age / 900);
+    const fresh = Math.max(0, Math.min(1, (l.__fresh - now) / 1500)); // 1 = vers, 0 = normaal
+    l.__mat.color.copy(inkC);
+    const target = (baseO + (LINK_FRESH - baseO) * fresh) * (l.__dim ? 0.25 : 1);
+    if (fadeIn < 1) l.__mat.opacity = fadeIn * target;
+    else l.__mat.opacity += (target - l.__mat.opacity) * k;
+    if (fadeIn >= 1 && fresh <= 0 && Math.abs(target - l.__mat.opacity) < 0.005) youngLinks.delete(l);
   }
   const manual = now < manualUntil;
   if (manual) { wasManual = true; }
@@ -327,8 +377,10 @@ function applyTheme() {
     const o = objects.get(n.id); if (!o) continue;
     o.userData.mesh.material.color.set(colorOf(n));
     o.userData.label.color = o.userData.big ? T().label : T().labelSoft;
+    o.userData.ripple.material.color.set(colorOf(n));
   }
-  Graph.linkColor(Graph.linkColor()).linkDirectionalParticleColor(Graph.linkDirectionalParticleColor());
+  for (const l of shownLinks) if (l.__mat) { l.__mat.color.set(T().ink); if (!youngLinks.has(l)) l.__mat.opacity = LINK_BASE() * (l.__dim ? 0.25 : 1); }
+  Graph.linkDirectionalParticleColor(Graph.linkDirectionalParticleColor());
   setLights();
   buildLegend();
   try { localStorage.setItem('vault-theme', theme); } catch (e) {}
@@ -341,8 +393,14 @@ function applyFocus() {
     const o = objects.get(n.id); if (!o) continue;
     const dim = (focusVak && n.vak !== focusVak && !['opleiding', 'jaar'].includes(n.type)) ||
       (selected && selected !== n.id && !adj.get(selected).has(n.id));
-    o.userData.mesh.material.opacity = dim ? 0.1 : 0.96;
-    o.userData.label.material.opacity = dim ? 0.08 : 1;
+    o.userData.base = dim ? 0.1 : 0.96;
+    o.userData.labelBase = dim ? 0.08 : 1;
+  }
+  for (const l of shownLinks) {
+    const s = idOf(l.source), t = idOf(l.target);
+    l.__dim = !!selected && s !== selected && t !== selected;
+    youngLinks.add(l); // laat de animatielus de nieuwe doorzichtigheid vloeiend instellen
+    if (!l.__born) l.__born = 0;
   }
   Graph.linkVisibility(l => {
     if (!focusVak) return true;
