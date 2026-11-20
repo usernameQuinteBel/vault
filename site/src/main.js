@@ -2,6 +2,7 @@ import ForceGraph3D from '3d-force-graph';
 import SpriteText from 'three-spritetext';
 import * as THREE from 'three';
 import { marked } from 'marked';
+import { forceX, forceY, forceZ } from 'd3-force-3d';
 
 /* ================= instellingen ================= */
 const THEMES = {
@@ -128,11 +129,17 @@ const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .onNodeHover(n => { $('graph').style.cursor = n ? 'pointer' : ''; })
   .onBackgroundClick(() => closePanel());
 
-Graph.d3Force('charge').strength(n => -40 - sizeOf(n) * 7);
+// afstoting enkel op korte afstand, zodat losse vakken niet wegdrijven
+Graph.d3Force('charge').strength(n => -30 - sizeOf(n) * 5).distanceMax(180);
 Graph.d3Force('link').distance(l => {
   const a = byId.get(idOf(l.source)), b = byId.get(idOf(l.target));
-  return 20 + (sizeOf(a) + sizeOf(b)) * 2.4;
+  return 16 + (sizeOf(a) + sizeOf(b)) * 1.8;
 });
+// zachte zwaartekracht naar het midden: houdt alle vakken bij elkaar
+const GRAVITY = 0.045;
+Graph.d3Force('gx', forceX(0).strength(GRAVITY));
+Graph.d3Force('gy', forceY(0).strength(GRAVITY));
+Graph.d3Force('gz', forceZ(0).strength(GRAVITY));
 
 // belichting
 Graph.lights().forEach(l => Graph.scene().remove(l));
