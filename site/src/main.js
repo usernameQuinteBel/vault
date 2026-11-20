@@ -72,7 +72,8 @@ const { order, parent } = growthOrder();
 /* ================= staat ================= */
 let visible = new Set(), shownNodes = [], shownLinks = [], cursor = 0;
 let playing = true, orbit = true, focusVak = null, selected = null, newest = null;
-let manualUntil = 0;                 // na een muisbeweging even geen automatische camera
+let manualUntil = 0;
+let dragging = false, justDragged = false;                 // na een muisbeweging even geen automatische camera
 const birth = new Map();             // id -> tijdstip van verschijnen
 const allLinks = data.links.map(l => ({ ...l }));
 const linksOf = new Map(data.nodes.map(n => [n.id, []]));
@@ -147,7 +148,14 @@ const Graph = ForceGraph3D({ controlType: 'orbit' })($('graph'))
   .d3AlphaDecay(0.011)        // trager afkoelen = vloeiender bewegen
   .d3VelocityDecay(0.6)      // meer "wrijving" = geen schokken bij nieuwe bolletjes
   .warmupTicks(0)
-  .onNodeClick(n => openNode(n.id, true))
+  .onNodeClick(n => { if (!justDragged) openNode(n.id, true); })
+  // slepen: camera staat stil zolang je sleept, daarna zweeft het bolletje terug
+  .onNodeDrag(n => { dragging = true; manualUntil = performance.now() + 6000; })
+  .onNodeDragEnd(n => {
+    dragging = false; justDragged = true; setTimeout(() => { justDragged = false; }, 150);
+    n.fx = n.fy = n.fz = undefined;            // niet vastpinnen
+    manualUntil = performance.now() + 4000;
+  })
   .onNodeHover(n => { $('graph').style.cursor = n ? 'pointer' : ''; })
   .onBackgroundClick(() => closePanel());
 
@@ -340,7 +348,12 @@ function keepCameraSafe(now) {
   }
   if (now - safeCheckAt < 50) return; safeCheckAt = now;
   for (const n of shownNodes) {
-    if (n.x === undefined || !Number.isFinite(n.x)) continue;
+    if (n.x === undefined) continue;
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z) || Math.abs(n.x) + Math.abs(n.y) + Math.abs(n.z) > 50000) {
+      // bolletje is "weggeschoten": terug naar het midden en snelheid op nul
+      n.x = n.y = n.z = 0; n.vx = n.vy = n.vz = 0; n.fx = n.fy = n.fz = undefined;
+      continue;
+    }
     const minD = sizeOf(n) * 4 + 18;
     tmpV.set(p.x - n.x, p.y - n.y, p.z - n.z);
     const d = tmpV.length();
@@ -390,13 +403,13 @@ let last = performance.now(), wasManual = false;
     else l.__mat.opacity += (target - l.__mat.opacity) * k;
     if (fadeIn >= 1 && fresh <= 0 && Math.abs(target - l.__mat.opacity) < 0.005) youngLinks.delete(l);
   }
-  const manual = now < manualUntil;
+  const manual = dragging || now < manualUntil;
   if (manual) { wasManual = true; }
   else {
     if (wasManual) { syncAngleFromCamera(); wasManual = false; }
     autoCamera(dt, now);
   }
-  keepCameraSafe(now);
+  if (!dragging) keepCameraSafe(now);
   requestAnimationFrame(animate);
 })();
 
