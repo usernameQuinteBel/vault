@@ -225,6 +225,9 @@ function reveal(id, from) {
     const k = linkKey(l);
     if (visible.has(other) && !shownLinkKeys.has(k)) {
       shownLinkKeys.add(k);
+      // meteen aan de echte bolletjes koppelen (nooit als losse naam doorgeven)
+      l.source = byId.get(idOf(l.source));
+      l.target = byId.get(idOf(l.target));
       l.__fresh = freshUntil;
       l.__born = performance.now();
       if (l.__mat) l.__mat.opacity = 0;
